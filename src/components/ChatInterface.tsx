@@ -1,8 +1,11 @@
-import { useState } from "react";
-import { Send, Bot, User } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Send, Bot, User, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { vertexAI } from "@/services/vertexAI";
+import { toast } from "@/hooks/use-toast";
+import AIConfigDialog from "./AIConfigDialog";
 
 interface Message {
   id: string;
@@ -26,9 +29,36 @@ export default function ChatInterface({ documentContext }: ChatInterfaceProps) {
   ]);
   const [input, setInput] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
+  const [showConfig, setShowConfig] = useState(false);
+  const [isAIConfigured, setIsAIConfigured] = useState(false);
+
+  useEffect(() => {
+    // Check if AI is already configured
+    const config = localStorage.getItem('ai_config');
+    if (config) {
+      try {
+        const parsedConfig = JSON.parse(config);
+        vertexAI.configure(parsedConfig);
+        setIsAIConfigured(true);
+      } catch (error) {
+        console.error('Failed to load AI configuration:', error);
+      }
+    }
+  }, []);
 
   const handleSendMessage = async () => {
     if (!input.trim() || isProcessing) return;
+
+    // Check if AI is configured
+    if (!isAIConfigured || !vertexAI.isConfigured()) {
+      setShowConfig(true);
+      toast({
+        title: "AI Configuration Required",
+        description: "Please configure AI settings to enable real responses",
+        variant: "destructive",
+      });
+      return;
+    }
 
     const userMessage: Message = {
       id: Date.now().toString(),
@@ -41,26 +71,54 @@ export default function ChatInterface({ documentContext }: ChatInterfaceProps) {
     setInput("");
     setIsProcessing(true);
 
-    // Simulate AI response
-    setTimeout(() => {
-      const responses = [
-        "Based on my analysis of the document, I can see that this clause relates to the payment terms outlined in Section 3. The payment is due within 30 days of invoice receipt, with a 2% late fee applied after that period.",
-        "This particular section establishes the intellectual property rights. According to the document, all work product created during the engagement becomes the property of the client upon full payment.",
-        "The termination clause allows either party to end the agreement with 30 days written notice. However, there are specific conditions that could trigger immediate termination, such as breach of confidentiality.",
-        "Looking at the liability limitations, the document caps damages at the total amount paid under the contract in the last 12 months. This is a fairly standard limitation clause.",
-        "The confidentiality provisions extend for 5 years after the agreement ends. Both parties are required to protect sensitive information shared during the engagement."
+    try {
+      // Use real AI response
+      const contextString = documentContext ? 
+        `Document Summary: ${documentContext.summary}\n` +
+        `Key Terms: ${documentContext.keyTerms?.join(', ')}\n` +
+        `Risks: ${documentContext.risks?.map((r: any) => r.title).join(', ')}` : 
+        '';
+
+      const response = await vertexAI.generateResponse(
+        input,
+        contextString,
+        messages.filter(m => m.role !== 'assistant' || m.id !== '1') // Exclude initial message
+      );
+
+      const assistantMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        content: response,
+        timestamp: new Date()
+      };
+
+      setMessages(prev => [...prev, assistantMessage]);
+    } catch (error) {
+      console.error('AI response error:', error);
+      
+      // Fallback to simulated response if AI fails
+      const fallbackResponses = [
+        "I'm having trouble connecting to the AI service. Please check your configuration and try again.",
+        "Unable to generate a response. Please ensure your API key is valid and try again."
       ];
 
       const assistantMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: responses[Math.floor(Math.random() * responses.length)],
+        content: fallbackResponses[0],
         timestamp: new Date()
       };
 
       setMessages(prev => [...prev, assistantMessage]);
+      
+      toast({
+        title: "AI Response Error",
+        description: "Failed to get AI response. Using fallback mode.",
+        variant: "destructive",
+      });
+    } finally {
       setIsProcessing(false);
-    }, 1000);
+    }
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
@@ -123,6 +181,14 @@ export default function ChatInterface({ documentContext }: ChatInterfaceProps) {
       </ScrollArea>
       
       <div className="flex gap-2 mt-4">
+        <Button
+          variant="outline"
+          size="icon"
+          onClick={() => setShowConfig(true)}
+          title="AI Settings"
+        >
+          <Settings className="w-4 h-4" />
+        </Button>
         <Input
           value={input}
           onChange={(e) => setInput(e.target.value)}
@@ -139,6 +205,18 @@ export default function ChatInterface({ documentContext }: ChatInterfaceProps) {
           <Send className="w-4 h-4" />
         </Button>
       </div>
+
+      <AIConfigDialog
+        open={showConfig}
+        onClose={() => setShowConfig(false)}
+        onConfigured={() => {
+          setIsAIConfigured(true);
+          toast({
+            title: "AI Configured",
+            description: "You can now use real AI responses for document analysis",
+          });
+        }}
+      />
     </div>
   );
 }

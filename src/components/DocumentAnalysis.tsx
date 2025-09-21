@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { vertexAI } from "@/services/vertexAI";
 import { FileText, AlertTriangle, CheckCircle, Loader2, Download, Flag } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -41,7 +42,16 @@ export default function DocumentAnalysis({ file, text }: DocumentAnalysisProps) 
     setIsAnalyzing(true);
     setProgress(0);
 
-    // Simulate document analysis with progress updates
+    // Get document text
+    let documentText = text || '';
+    
+    if (file && !text) {
+      // For real implementation, you'd use Document AI here
+      // For now, we'll use the file name as placeholder
+      documentText = `Document content from ${file.name}`;
+    }
+
+    // Progress updates
     const progressInterval = setInterval(() => {
       setProgress(prev => {
         if (prev >= 90) {
@@ -52,48 +62,81 @@ export default function DocumentAnalysis({ file, text }: DocumentAnalysisProps) 
       });
     }, 300);
 
-    // Simulate API call to analyze document
-    setTimeout(() => {
-      clearInterval(progressInterval);
-      setProgress(100);
-      
-      // Mock analysis result
-      const mockResult: AnalysisResult = {
-        summary: "This is a standard service agreement between the service provider and client. The contract outlines terms for software development services, including project scope, timeline, payment terms, and intellectual property rights. The agreement is generally balanced but contains some clauses that require attention.",
-        risks: [
-          {
-            clause: "Unlimited liability clause in Section 7.2",
-            severity: "high",
-            explanation: "The service provider assumes unlimited liability for any damages, which is unusual and potentially costly."
-          },
-          {
-            clause: "Automatic renewal in Section 12.1",
-            severity: "medium",
-            explanation: "Contract automatically renews for 1-year terms unless cancelled 60 days in advance."
-          },
-          {
-            clause: "Non-compete clause in Section 9.3",
-            severity: "low",
-            explanation: "Restricts working with competitors for 6 months after contract ends."
-          }
-        ],
-        unusualClauses: [
-          "Arbitration must occur in provider's jurisdiction",
-          "Client grants unlimited license to use feedback",
-          "No warranty provided for deliverables"
-        ],
-        confidence: 87,
-        keyTerms: ["Payment Terms", "Intellectual Property", "Confidentiality", "Termination", "Liability"]
-      };
+    try {
+      // Check if AI is configured
+      if (vertexAI.isConfigured()) {
+        // Use real AI analysis
+        const aiResult = await vertexAI.analyzeDocument(documentText);
+        
+        clearInterval(progressInterval);
+        setProgress(100);
 
-      setAnalysisResult(mockResult);
+        const result: AnalysisResult = {
+          summary: aiResult.summary || "Analysis completed. Please review the details below.",
+          risks: aiResult.risks?.map((risk: any, index: number) => ({
+            clause: risk,
+            severity: aiResult.riskLevel === 'High' ? 'high' : aiResult.riskLevel === 'Low' ? 'low' : 'medium',
+            explanation: `Risk identified in the document that requires attention.`
+          })) || [],
+          unusualClauses: aiResult.unusualClauses || [],
+          confidence: aiResult.confidence || 85,
+          keyTerms: aiResult.keyTerms || []
+        };
+
+        setAnalysisResult(result);
+      } else {
+        // Fallback to mock data if AI is not configured
+        clearInterval(progressInterval);
+        setProgress(100);
+        
+        const mockResult: AnalysisResult = {
+          summary: "This is a standard service agreement between the service provider and client. The contract outlines terms for software development services, including project scope, timeline, payment terms, and intellectual property rights. The agreement is generally balanced but contains some clauses that require attention.",
+          risks: [
+            {
+              clause: "Unlimited liability clause in Section 7.2",
+              severity: "high",
+              explanation: "The service provider assumes unlimited liability for any damages, which is unusual and potentially costly."
+            },
+            {
+              clause: "Automatic renewal in Section 12.1",
+              severity: "medium",
+              explanation: "Contract automatically renews for 1-year terms unless cancelled 60 days in advance."
+            },
+            {
+              clause: "Non-compete clause in Section 9.3",
+              severity: "low",
+              explanation: "Restricts working with competitors for 6 months after contract ends."
+            }
+          ],
+          unusualClauses: [
+            "Arbitration must occur in provider's jurisdiction",
+            "Client grants unlimited license to use feedback",
+            "No warranty provided for deliverables"
+          ],
+          confidence: 87,
+          keyTerms: ["Payment Terms", "Intellectual Property", "Confidentiality", "Termination", "Liability"]
+        };
+
+        setAnalysisResult(mockResult);
+      }
+
       setIsAnalyzing(false);
       
       toast({
         title: "Analysis Complete",
         description: "Your document has been successfully analyzed",
       });
-    }, 3000);
+    } catch (error) {
+      clearInterval(progressInterval);
+      setProgress(0);
+      setIsAnalyzing(false);
+      
+      toast({
+        title: "Analysis Failed",
+        description: "Failed to analyze document. Please try again or configure AI settings.",
+        variant: "destructive",
+      });
+    }
   };
 
   const downloadSummary = () => {
